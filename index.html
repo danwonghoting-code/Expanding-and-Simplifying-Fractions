@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <!-- 針對 iPad 最佳化：禁止縮放、設定為 Web App 模式 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>分數擴分與約分學習</title>
+  
+  <!-- 引入 Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 引入 React 與 ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- 引入 Babel 用於在瀏覽器中編譯 JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* 避免在 iPad 上拖拉或長按時不小心選取到文字或圖片，提升 App 質感 */
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      background-color: #e0f2fe; /* 已將背景改為粉藍色 */
+      margin: 0;
+      padding: 0;
+    }
+    
+    /* 允許輸入框可以被選取與輸入文字 */
+    input[type="number"] {
+      -webkit-user-select: text;
+      user-select: text;
+    }
+
+    /* 隱藏數字輸入框的上下箭頭 */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; 
+      margin: 0; 
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+  <div id="root" class="w-full max-w-5xl"></div>
+
+  <script type="text/babel">
+    const { useState, useRef } = React;
+
+    // ==========================================
+    // 擴分模式專用：等分/細分視覺化長條圖
+    // ==========================================
+    const FractionBarExpand = ({ num, den, multiplier = 1, isActive = false }) => {
+      const width = 480;
+      const height = 80;
+      const totalParts = den * multiplier;
+      const coloredParts = num * multiplier;
+      const partWidth = width / totalParts;
+
+      return (
+        <svg width={width} height={height} className="border-[3px] border-black bg-white shadow-sm">
+          {/* 填色區域 */}
+          <rect x="0" y="0" width={partWidth * coloredParts} height={height} fill="#ffcdd2" />
+
+          {/* 分隔線 */}
+          {Array.from({ length: totalParts - 1 }).map((_, i) => {
+            const xPos = (i + 1) * partWidth;
+            const isMajorLine = (i + 1) % multiplier === 0;
+
+            return (
+              <line
+                key={i}
+                x1={xPos}
+                y1="0"
+                x2={xPos}
+                y2={height}
+                stroke="black"
+                strokeWidth={isMajorLine ? 3 : 1.5}
+                strokeDasharray={isMajorLine ? "8,8" : "4,4"}
+                opacity={isMajorLine ? 1 : 0.6}
+              />
+            );
+          })}
+        </svg>
+      );
+    };
+
+    // ==========================================
+    // 約分模式專用：基礎分數長條圖
+    // ==========================================
+    const FractionBarSimplifyBase = ({ num, den }) => {
+      const width = 480;
+      const height = 80;
+      const partWidth = width / den;
+
+      return (
+        <svg width={width} height={height} className="border-[3px] border-black bg-white shadow-sm">
+          <rect x="0" y="0" width={partWidth * num} height={height} fill="#ffcdd2" />
+          {Array.from({ length: den - 1 }).map((_, i) => (
+            <line
+              key={i}
+              x1={(i + 1) * partWidth}
+              y1="0"
+              x2={(i + 1) * partWidth}
+              y2={height}
+              stroke="black"
+              strokeWidth="1.5"
+              strokeDasharray="6,6"
+            />
+          ))}
+        </svg>
+      );
+    };
+
+    // ==========================================
+    // 約分模式專用：可互動拖拉的紅色群組長條圖
+    // ==========================================
+    const FractionBarSimplifyInteractive = ({ num, den, groupSize, onGroupSizeChange }) => {
+      const width = 480;
+      const height = 80;
+      const partWidth = width / den;
+      const containerRef = useRef(null);
+
+      // 處理紅點拖曳邏輯 (Pointer events 完美支援 iPad)
+      const handlePointerDown = (e) => {
+        e.target.setPointerCapture(e.pointerId);
+      };
+
+      const handlePointerMove = (e) => {
+        if (!e.target.hasPointerCapture(e.pointerId)) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        let newSize = Math.round(x / partWidth);
+        newSize = Math.max(1, Math.min(newSize, den));
+        if (newSize !== groupSize) {
+          onGroupSizeChange(newSize);
+        }
+      };
+
+      const handlePointerUp = (e) => {
+        e.target.releasePointerCapture(e.pointerId);
+      };
+
+      return (
+        <div className="relative inline-block" ref={containerRef}>
+          <svg width={width} height={height} className="border-[3px] border-black bg-white shadow-sm">
+            {/* 填色區域 */}
+            <rect x="0" y="0" width={partWidth * num} height={height} fill="#ffcdd2" />
+
+            {/* 基礎黑色虛線 */}
+            {Array.from({ length: den - 1 }).map((_, i) => (
+              <line
+                key={`base-${i}`}
+                x1={(i + 1) * partWidth}
+                y1="0"
+                x2={(i + 1) * partWidth}
+                y2={height}
+                stroke="black"
+                strokeWidth="1.5"
+                strokeDasharray="6,6"
+              />
+            ))}
+
+            {/* 紅色分組框線 */}
+            {groupSize > 0 && (
+              <g>
+                {/* 分組內的紅色粗虛線 */}
+                {Array.from({ length: groupSize - 1 }).map((_, i) => (
+                  <line
+                    key={`red-line-${i}`}
+                    x1={(i + 1) * partWidth}
+                    y1="0"
+                    x2={(i + 1) * partWidth}
+                    y2={height}
+                    stroke="red"
+                    strokeWidth="3"
+                    strokeDasharray="6,6"
+                  />
+                ))}
+                {/* 紅色群組外框 */}
+                <rect
+                  x="0"
+                  y="0"
+                  width={groupSize * partWidth}
+                  height={height}
+                  fill="none"
+                  stroke="red"
+                  strokeWidth="4"
+                  className="pointer-events-none"
+                />
+              </g>
+            )}
+          </svg>
+
+          {/* 互動紅點 (Drag Handle) */}
+          <div
+            className="absolute cursor-ew-resize flex items-center justify-center z-10"
+            style={{
+              left: `${groupSize * partWidth}px`,
+              top: `${height}px`,
+              transform: 'translate(-50%, -50%)',
+              width: '50px', // 在 iPad 上稍微放大觸控區域
+              height: '50px',
+              touchAction: 'none' // 防止在手機/平板上拖曳時滾動視窗
+            }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          >
+            <div className="relative flex items-center justify-center pointer-events-none">
+              <div className="w-5 h-5 bg-red-500 rounded-full shadow-md"></div>
+              <div className="absolute w-10 h-10 rounded-full border-2 border-red-500 opacity-50"></div>
+              <div className="absolute left-full ml-1 text-red-500 text-base font-bold">→</div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 主應用程式 Component
+    // ==========================================
+    function App() {
+      const [mode, setMode] = useState('simplify');
+
+      // 擴分模式 State
+      const [expNum, setExpNum] = useState(1);
+      const [expDen, setExpDen] = useState(4);
+      const [isSubdividing, setIsSubdividing] = useState(false);
+      const [multiplier, setMultiplier] = useState(2);
+
+      // 約分模式 State
+      const [simNumStr, setSimNumStr] = useState("12");
+      const [simDenStr, setSimDenStr] = useState("18");
+      const [simNum, setSimNum] = useState(12);
+      const [simDen, setSimDen] = useState(18);
+      const [groupSize, setGroupSize] = useState(1);
+
+      // ----------------------------------------
+      // 擴分模式邏輯
+      // ----------------------------------------
+      const changeExpNum = (delta) => setExpNum(prev => Math.max(1, Math.min(prev + delta, expDen)));
+      const changeExpDen = (delta) => {
+        setExpDen(prev => {
+          const newDen = Math.max(1, Math.min(prev + delta, 12));
+          if (expNum > newDen) setExpNum(newDen);
+          return newDen;
+        });
+      };
+      const changeMultiplier = (delta) => setMultiplier(prev => Math.max(2, Math.min(prev + delta, 6)));
+
+      // ----------------------------------------
+      // 約分模式邏輯
+      // ----------------------------------------
+      const handleSimNumBlur = () => {
+        let val = parseInt(simNumStr, 10);
+        if (isNaN(val) || val < 1) val = 1;
+        if (val > simDen) val = simDen; // 確保為真分數或等於1
+        setSimNumStr(val.toString());
+        setSimNum(val);
+        setGroupSize(1); // 改變分數時重置群組
+      };
+
+      const handleSimDenBlur = () => {
+        let val = parseInt(simDenStr, 10);
+        if (isNaN(val) || val < 2) val = 2;
+        if (val > 60) val = 60; // 限制最大分母為60
+        setSimDenStr(val.toString());
+        setSimDen(val);
+        if (simNum > val) {
+          setSimNum(val);
+          setSimNumStr(val.toString());
+        }
+        setGroupSize(1);
+      };
+
+      const changeGroupSize = (delta) => {
+        setGroupSize(prev => Math.max(1, Math.min(prev + delta, simDen)));
+      };
+
+      const isDivisible = simNum % groupSize === 0 && simDen % groupSize === 0;
+
+      return (
+        <div className="w-full bg-white p-8 md:p-10 rounded-2xl shadow-xl border border-gray-200 mx-auto">
+          
+          {/* 右上角模式切換 */}
+          <div className="flex justify-end gap-6 mb-6 md:mb-8 text-xl">
+            <label className="flex items-center gap-2 cursor-pointer text-gray-600 hover:text-red-600 font-bold transition-colors">
+              <input 
+                type="checkbox" 
+                checked={mode === 'expand'} 
+                onChange={() => setMode('expand')}
+                className="w-6 h-6 accent-red-600 cursor-pointer"
+              />
+              <span className={mode === 'expand' ? 'text-red-600' : ''}>擴分</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-gray-600 hover:text-indigo-600 font-bold transition-colors">
+              <input 
+                type="checkbox" 
+                checked={mode === 'simplify'} 
+                onChange={() => setMode('simplify')}
+                className="w-6 h-6 accent-indigo-600 cursor-pointer"
+              />
+              <span className={mode === 'simplify' ? 'text-indigo-600' : ''}>約分</span>
+            </label>
+          </div>
+
+          {/* ========================================================= */}
+          {/* 擴分模式視圖 */}
+          {/* ========================================================= */}
+          {mode === 'expand' && (
+            <div className="animate-fade-in">
+              <div className="flex items-center justify-center gap-10 md:gap-16 mb-10">
+                <div className="w-[480px] flex-shrink-0"><FractionBarExpand num={expNum} den={expDen} multiplier={1} /></div>
+                <div className="flex flex-col items-center justify-center gap-2 w-[320px] flex-shrink-0">
+                  <div className="flex items-center gap-4">
+                    <span className="text-[48px] font-serif w-12 text-center">{expNum}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => changeExpNum(-1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 rounded-lg hover:bg-gray-100 shadow-sm active:bg-gray-200">－</button>
+                      <button onClick={() => changeExpNum(1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 rounded-lg hover:bg-gray-100 shadow-sm active:bg-gray-200">＋</button>
+                    </div>
+                  </div>
+                  <div className="w-full h-[3px] bg-black my-1"></div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-[48px] font-serif w-12 text-center">{expDen}</span>
+                    <div className="flex gap-2">
+                      <button onClick={() => changeExpDen(-1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 rounded-lg hover:bg-gray-100 shadow-sm active:bg-gray-200">－</button>
+                      <button onClick={() => changeExpDen(1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 rounded-lg hover:bg-gray-100 shadow-sm active:bg-gray-200">＋</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mb-8 flex items-center justify-start ml-4 gap-4">
+                <label className="flex items-center gap-3 cursor-pointer text-red-500 text-2xl font-bold">
+                  <input 
+                    type="checkbox" 
+                    checked={isSubdividing}
+                    onChange={(e) => setIsSubdividing(e.target.checked)}
+                    className="w-7 h-7 accent-red-500 cursor-pointer rounded"
+                  />
+                  將每份再細分
+                </label>
+                {isSubdividing && (
+                   <div className="flex items-center gap-4 ml-6 bg-red-50 px-5 py-3 rounded-xl border border-red-200 shadow-inner">
+                      <span className="text-gray-700 font-bold text-xl">分成</span>
+                      <button onClick={() => changeMultiplier(-1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 bg-white hover:bg-gray-100 rounded-lg shadow-sm active:bg-gray-200">－</button>
+                      <span className="text-2xl font-bold w-8 text-center text-red-600">{multiplier}</span>
+                      <button onClick={() => changeMultiplier(1)} className="w-10 h-10 text-xl flex items-center justify-center border border-gray-400 bg-white hover:bg-gray-100 rounded-lg shadow-sm active:bg-gray-200">＋</button>
+                      <span className="text-gray-700 font-bold text-xl">小份</span>
+                   </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-center gap-10 md:gap-16 transition-opacity duration-300">
+                <div className="w-[480px] flex-shrink-0">
+                  <FractionBarExpand num={expNum} den={expDen} multiplier={isSubdividing ? multiplier : 1} isActive={isSubdividing} />
+                </div>
+                {/* 加入 h-[160px] 鎖定高度 */}
+                <div className="flex items-center justify-center w-[320px] flex-shrink-0 h-[160px]">
+                  {isSubdividing ? (
+                    <div className="flex items-center gap-6">
+                      <div className="flex flex-col items-center">
+                         {/* 加入 leading-none */}
+                         <div className="flex items-center gap-1 text-[36px] font-serif leading-none">
+                           <span>{expNum}</span><span className="text-2xl text-red-500 mx-2">×</span><span className="text-red-500">{multiplier}</span>
+                         </div>
+                         <div className="w-full h-[3px] bg-black my-2"></div>
+                         <div className="flex items-center gap-1 text-[36px] font-serif leading-none">
+                           <span>{expDen}</span><span className="text-2xl text-red-500 mx-2">×</span><span className="text-red-500">{multiplier}</span>
+                         </div>
+                      </div>
+                      <span className="text-4xl mx-4">=</span>
+                      <div className="flex flex-col items-center text-[54px] font-serif leading-none">
+                        <span>{expNum * multiplier}</span>
+                        <div className="w-full h-[3px] bg-black my-2"></div>
+                        <span>{expDen * multiplier}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center text-[54px] font-serif mx-auto leading-none">
+                      <span>{expNum}</span>
+                      <div className="w-full h-[3px] bg-black my-2"></div>
+                      <span>{expDen}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+
+          {/* ========================================================= */}
+          {/* 約分模式視圖 */}
+          {/* ========================================================= */}
+          {mode === 'simplify' && (
+            <div className="animate-fade-in">
+              <p className="mb-8 text-xl font-bold text-gray-800 ml-4">在方格內輸入分母不大於 60 的真分數。</p>
+
+              {/* 上方：輸入基礎分數 */}
+              <div className="flex items-center justify-center gap-10 md:gap-16 mb-10">
+                <div className="w-[480px] flex-shrink-0">
+                  <FractionBarSimplifyBase num={simNum} den={simDen} />
+                </div>
+                <div className="flex flex-col items-center justify-center w-[320px] flex-shrink-0">
+                  <input 
+                    type="number" 
+                    value={simNumStr} 
+                    onChange={(e) => setSimNumStr(e.target.value)}
+                    onBlur={handleSimNumBlur}
+                    className="w-24 h-16 text-4xl text-center border-2 border-gray-400 rounded-lg shadow-sm focus:border-indigo-500 outline-none font-serif bg-gray-50" 
+                  />
+                  <div className="w-32 h-[3px] bg-black my-4"></div>
+                  <input 
+                    type="number" 
+                    value={simDenStr} 
+                    onChange={(e) => setSimDenStr(e.target.value)}
+                    onBlur={handleSimDenBlur}
+                    className="w-24 h-16 text-4xl text-center border-2 border-gray-400 rounded-lg shadow-sm focus:border-indigo-500 outline-none font-serif bg-gray-50" 
+                  />
+                </div>
+              </div>
+
+              {/* 中間：控制按鈕 */}
+              <div className="mb-8 flex items-center justify-start ml-4 gap-6">
+                <span className="text-2xl font-bold text-gray-700">
+                  每 <span className="text-red-500 font-black text-3xl mx-2">{groupSize}</span> 份一組
+                </span>
+                <div className="flex gap-3 ml-2">
+                  <button onClick={() => changeGroupSize(-1)} className="w-12 h-12 text-2xl flex items-center justify-center border-2 border-gray-400 bg-white hover:bg-gray-100 rounded-lg shadow-sm active:bg-gray-200">－</button>
+                  <button onClick={() => changeGroupSize(1)} className="w-12 h-12 text-2xl flex items-center justify-center border-2 border-gray-400 bg-white hover:bg-gray-100 rounded-lg shadow-sm active:bg-gray-200">＋</button>
+                </div>
+              </div>
+
+              {/* 下方：拖曳互動與算式 */}
+              <div className="flex items-start justify-center gap-10 md:gap-16 transition-opacity duration-300">
+                <div className="flex flex-col gap-6 w-[480px] flex-shrink-0">
+                  <FractionBarSimplifyInteractive 
+                    num={simNum} 
+                    den={simDen} 
+                    groupSize={groupSize} 
+                    onGroupSizeChange={setGroupSize} 
+                  />
+                  <p className="text-gray-600 text-xl font-bold mt-2 text-center">↑ 左右拖拉紅點，看看能否將分數約簡。</p>
+                </div>
+
+                {/* 右側結果與除法算式 加入 h-[160px] 鎖定高度 */}
+                <div className="flex items-center justify-center mt-2 w-[320px] flex-shrink-0 h-[160px]">
+                  {groupSize > 1 ? (
+                    <div className="flex items-center gap-6">
+                      <div className="flex flex-col items-center">
+                        {/* 加入 leading-none */}
+                        <div className="flex items-center gap-1 text-[36px] font-serif leading-none">
+                          <span>{simNum}</span>
+                          <span className="text-2xl text-indigo-600 mx-2">÷</span>
+                          <span className="text-indigo-600">{groupSize}</span>
+                        </div>
+                        <div className="w-full h-[3px] bg-black my-3"></div>
+                        <div className="flex items-center gap-1 text-[36px] font-serif leading-none">
+                          <span>{simDen}</span>
+                          <span className="text-2xl text-indigo-600 mx-2">÷</span>
+                          <span className="text-indigo-600">{groupSize}</span>
+                        </div>
+                      </div>
+                      
+                      {/* 判斷是否能整除 */}
+                      {isDivisible ? (
+                        <>
+                          <span className="text-3xl mx-2">=</span>
+                          {/* 將最簡分數縮小為 text-[36px] 並且加上 leading-none */}
+                          <div className="flex flex-col items-center text-[36px] font-serif text-green-600 leading-none">
+                            <span>{simNum / groupSize}</span>
+                            <div className="w-full h-[3px] bg-green-600 my-2"></div>
+                            <span>{simDen / groupSize}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-3xl mx-2 text-red-500">≠</span>
+                          <div className="flex flex-col items-center text-2xl text-red-600 font-bold px-4 py-2 bg-red-50 border-2 border-red-200 rounded-xl leading-none">
+                            無法<br/>整除
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ) : (
+                    // 當未分組 (groupSize = 1) 時，顯示原分數
+                    <div className="flex flex-col items-center text-[54px] font-serif mx-auto leading-none">
+                      <span>{simNum}</span>
+                      <div className="w-full h-[3px] bg-black my-3"></div>
+                      <span>{simDen}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    // 渲染應用程式
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
